@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
@@ -151,7 +152,7 @@ func NewStore(cfg Config, storeCfg config.ChunkStoreConfig, schemaCfg config.Sch
 }
 
 func (s *store) init() error {
-	for _, p := range s.schemaCfg.Configs {
+	for i, p := range s.schemaCfg.Configs {
 		chunkClient, err := s.chunkClientForPeriod(p)
 		if err != nil {
 			return err
@@ -161,10 +162,33 @@ func (s *store) init() error {
 			return err
 		}
 
-		w, idx, stop, err := s.storeForPeriod(p, chunkClient, f)
+		if p.IndexType == config.BoltDBShipperType && s.cfg.BoltDBShipperConfig.SharedStoreType != "" &&
+			s.cfg.BoltDBShipperConfig.SharedStoreType != p.ObjectType {
+			from, _ := p.From.MarshalYAML()
+			level.Info(s.logger).Log("skipping store init for this period as object store does not match -boltdb.shipper.shared-store",
+				"from", from, "object-type", p.ObjectType)
+			continue
+		}
+
+		if p.IndexType == config.TSDBType && s.cfg.TSDBShipperConfig.SharedStoreType != "" &&
+			s.cfg.TSDBShipperConfig.SharedStoreType != p.ObjectType {
+			from, _ := p.From.MarshalYAML()
+			level.Info(s.logger).Log("skipping store init for this period as object store does not match -tsdb.shipper.shared-store",
+				"from", from, "object-type", p.ObjectType)
+			continue
+		}
+
+		periodEndTime := config.DayTime{Time: math.MaxInt64}
+		if i < len(s.schemaCfg.Configs)-1 {
+			periodEndTime = config.DayTime{Time: s.schemaCfg.Configs[i+1].From.Time.Add(-time.Millisecond)}
+		}
+
+		tableRange := p.GetIndexTableNumberRange(periodEndTime)
+		w, idx, stop, err := s.storeForPeriod(p, tableRange, chunkClient, f)
 		if err != nil {
 			return err
 		}
+
 		s.composite.AddStore(p.From.Time, f, idx, w, stop)
 	}
 
@@ -204,7 +228,7 @@ func shouldUseIndexGatewayClient(cfg indexshipper.Config) bool {
 	return true
 }
 
-func (s *store) storeForPeriod(p config.PeriodConfig, chunkClient client.Client, f *fetcher.Fetcher) (stores.ChunkWriter, index.ReaderWriter, func(), error) {
+func (s *store) storeForPeriod(p config.PeriodConfig, tableRange config.TableRange, chunkClient client.Client, f *fetcher.Fetcher) (stores.ChunkWriter, index.ReaderWriter, func(), error) {
 	indexClientReg := prometheus.WrapRegistererWith(
 		prometheus.Labels{
 			"component": fmt.Sprintf(
@@ -240,14 +264,17 @@ func (s *store) storeForPeriod(p config.PeriodConfig, chunkClient client.Client,
 			pCopy := p
 			pCopy.IndexType = config.BoltDBShipperType
 			pCopy.IndexTables.Prefix = fmt.Sprintf("%sbackup_", pCopy.IndexTables.Prefix)
-			_, backupIndexWriter, backupStoreStop, err = s.storeForPeriod(pCopy, chunkClient, f)
+			_, backupIndexWriter, backupStoreStop, err = s.storeForPeriod(pCopy, tableRange, chunkClient, f)
 			if err != nil {
 				return nil, nil, nil, err
 			}
 		}
 
-		indexReaderWriter, stopTSDBStoreFunc, err := tsdb.NewStore(s.cfg.TSDBShipperConfig, p, f, objectClient, s.limits,
-			getIndexStoreTableRanges(config.TSDBType, s.schemaCfg.Configs), backupIndexWriter, indexClientReg)
+		tableStart := p.From.Unix() / int64(p.IndexTables.Period/time.Second)
+		prefix := fmt.Sprintf("%s_%d", p.ObjectType, tableStart)
+
+		indexReaderWriter, stopTSDBStoreFunc, err := tsdb.NewStore(prefix, s.cfg.TSDBShipperConfig, p, f, objectClient, s.limits,
+			tableRange, backupIndexWriter, indexClientReg)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -265,7 +292,7 @@ func (s *store) storeForPeriod(p config.PeriodConfig, chunkClient client.Client,
 			}, nil
 	}
 
-	idx, err := NewIndexClient(p.IndexType, s.cfg, s.schemaCfg, s.limits, s.clientMetrics, nil, indexClientReg)
+	idx, err := NewIndexClient(p, tableRange, s.cfg, s.schemaCfg, s.limits, s.clientMetrics, nil, indexClientReg)
 	if err != nil {
 		return nil, nil, nil, errors.Wrap(err, "error creating index client")
 	}

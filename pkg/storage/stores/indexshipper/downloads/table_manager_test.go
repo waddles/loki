@@ -141,7 +141,7 @@ func TestTableManager_ensureQueryReadiness(t *testing.T) {
 		cfg:                cfg,
 		indexStorageClient: mockIndexStorageClient,
 		tables:             make(map[string]Table),
-		tableRangesToHandle: config.TableRanges{{
+		tableRangeToHandle: config.TableRanges{{
 			Start: 0, End: math.MaxInt64, PeriodConfig: &config.PeriodConfig{},
 		}},
 		ctx:    context.Background(),
@@ -337,13 +337,13 @@ func TestTableManager_ensureQueryReadiness(t *testing.T) {
 			tableManager.cfg.QueryReadyNumDays = tc.queryReadyNumDaysCfg
 			tableManager.cfg.Limits = &tc.queryReadinessLimits
 			if tc.tableRangesToHandle == nil {
-				tableManager.tableRangesToHandle = config.TableRanges{{
+				tableManager.tableRangeToHandle = config.TableRanges{{
 					Start: 0, End: math.MaxInt64, PeriodConfig: &config.PeriodConfig{
 						IndexTables: config.PeriodicTableConfig{Prefix: indexTablePrefix},
 					},
 				}}
 			} else {
-				tableManager.tableRangesToHandle = tc.tableRangesToHandle
+				tableManager.tableRangeToHandle = tc.tableRangesToHandle
 			}
 			require.NoError(t, tableManager.ensureQueryReadiness(context.Background()))
 

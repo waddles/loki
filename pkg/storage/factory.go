@@ -138,8 +138,8 @@ func (cfg *Config) Validate() error {
 }
 
 // NewIndexClient makes a new index client of the desired type.
-func NewIndexClient(name string, cfg Config, schemaCfg config.SchemaConfig, limits StoreLimits, cm ClientMetrics, ownsTenantFn downloads.IndexGatewayOwnsTenant, registerer prometheus.Registerer) (index.Client, error) {
-	switch name {
+func NewIndexClient(period config.PeriodConfig, tableRange config.TableRange, cfg Config, schemaCfg config.SchemaConfig, limits StoreLimits, cm ClientMetrics, ownsTenantFn downloads.IndexGatewayOwnsTenant, registerer prometheus.Registerer) (index.Client, error) {
+	switch period.IndexType {
 	case config.StorageTypeInMemory:
 		store := testutils.NewMockStorage()
 		return store, nil
@@ -180,19 +180,20 @@ func NewIndexClient(name string, cfg Config, schemaCfg config.SchemaConfig, limi
 			return gateway, nil
 		}
 
-		objectClient, err := NewObjectClient(cfg.BoltDBShipperConfig.SharedStoreType, cfg, cm)
+		objectClient, err := NewObjectClient(period.ObjectType, cfg, cm)
 		if err != nil {
 			return nil, err
 		}
 
-		tableRanges := getIndexStoreTableRanges(config.BoltDBShipperType, schemaCfg.Configs)
+		tableStart := period.From.Unix() / int64(period.IndexTables.Period/time.Second)
+		prefix := fmt.Sprintf("%s_%d", period.ObjectType, tableStart)
 
-		boltDBIndexClientWithShipper, err = shipper.NewShipper(cfg.BoltDBShipperConfig, objectClient, limits,
-			ownsTenantFn, tableRanges, registerer)
+		boltDBIndexClientWithShipper, err = shipper.NewShipper(prefix, cfg.BoltDBShipperConfig, objectClient, limits,
+			ownsTenantFn, tableRange, registerer)
 
 		return boltDBIndexClientWithShipper, err
 	default:
-		return nil, fmt.Errorf("Unrecognized storage client %v, choose one of: %v, %v, %v, %v, %v, %v", name, config.StorageTypeAWS, config.StorageTypeCassandra, config.StorageTypeInMemory, config.StorageTypeGCP, config.StorageTypeBigTable, config.StorageTypeBigTableHashed)
+		return nil, fmt.Errorf("Unrecognized storage client %v, choose one of: %v, %v, %v, %v, %v, %v", period.IndexType, config.StorageTypeAWS, config.StorageTypeCassandra, config.StorageTypeInMemory, config.StorageTypeGCP, config.StorageTypeBigTable, config.StorageTypeBigTableHashed)
 	}
 }
 

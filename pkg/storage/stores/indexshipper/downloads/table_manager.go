@@ -54,10 +54,10 @@ type Config struct {
 }
 
 type tableManager struct {
-	cfg                 Config
-	openIndexFileFunc   index.OpenIndexFileFunc
-	indexStorageClient  storage.Client
-	tableRangesToHandle config.TableRanges
+	cfg                Config
+	openIndexFileFunc  index.OpenIndexFileFunc
+	indexStorageClient storage.Client
+	tableRangeToHandle config.TableRange
 
 	tables    map[string]Table
 	tablesMtx sync.RWMutex
@@ -71,22 +71,22 @@ type tableManager struct {
 }
 
 func NewTableManager(cfg Config, openIndexFileFunc index.OpenIndexFileFunc, indexStorageClient storage.Client,
-	ownsTenantFn IndexGatewayOwnsTenant, tableRangesToHandle config.TableRanges, reg prometheus.Registerer) (TableManager, error) {
+	ownsTenantFn IndexGatewayOwnsTenant, tableRangeToHandle config.TableRange, reg prometheus.Registerer) (TableManager, error) {
 	if err := util.EnsureDirectory(cfg.CacheDir); err != nil {
 		return nil, err
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	tm := &tableManager{
-		cfg:                 cfg,
-		openIndexFileFunc:   openIndexFileFunc,
-		indexStorageClient:  indexStorageClient,
-		tableRangesToHandle: tableRangesToHandle,
-		ownsTenant:          ownsTenantFn,
-		tables:              make(map[string]Table),
-		metrics:             newMetrics(reg),
-		ctx:                 ctx,
-		cancel:              cancel,
+		cfg:                cfg,
+		openIndexFileFunc:  openIndexFileFunc,
+		indexStorageClient: indexStorageClient,
+		tableRangeToHandle: tableRangeToHandle,
+		ownsTenant:         ownsTenantFn,
+		tables:             make(map[string]Table),
+		metrics:            newMetrics(reg),
+		ctx:                ctx,
+		cancel:             cancel,
 	}
 
 	// load the existing tables first.
@@ -286,7 +286,7 @@ func (tm *tableManager) ensureQueryReadiness(ctx context.Context) error {
 			return err
 		}
 
-		if tableNumber == -1 || !tm.tableRangesToHandle.TableInRange(tableNumber, tableName) {
+		if tableNumber == -1 || !tm.tableRangeToHandle.TableInRange(tableNumber, tableName) {
 			continue
 		}
 
@@ -387,7 +387,7 @@ func (tm *tableManager) loadLocalTables() error {
 		if err != nil {
 			return err
 		}
-		if tableNumber == -1 || !tm.tableRangesToHandle.TableInRange(tableNumber, entry.Name()) {
+		if tableNumber == -1 || !tm.tableRangeToHandle.TableInRange(tableNumber, entry.Name()) {
 			continue
 		}
 

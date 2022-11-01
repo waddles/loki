@@ -67,6 +67,19 @@ type TableRange struct {
 	PeriodConfig *PeriodConfig
 }
 
+func (t TableRange) TableInRange(tableNumber int64, tableName string) bool {
+	return t.Start <= tableNumber && tableNumber <= t.End &&
+		fmt.Sprintf("%s%s", t.PeriodConfig.IndexTables.Prefix, strconv.Itoa(int(tableNumber))) == tableName
+}
+
+func (t TableRange) ConfigForTableNumber(tableNumber int64) *PeriodConfig {
+	if t.Start <= tableNumber && tableNumber <= t.End {
+		return t.PeriodConfig
+	}
+
+	return nil
+}
+
 // TableRanges represents a list of table ranges for multiple schemas.
 type TableRanges []TableRange
 
